@@ -1,0 +1,82 @@
+# https://packaging.python.org/en/latest/guides/publishing-package-distribution-releases-using-github-actions-ci-cd-workflows/
+name: tests
+
+on: [push, pull_request, workflow_dispatch]
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    # strategy:
+    #   matrix:
+    #     python-version: ["3.12"]
+
+    timeout-minutes: 15
+    env:
+      PGHOST: localhost
+      PGDATABASE: database_name
+      PGUSERNAME: username
+      PGPASSWORD: password
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install latest version of Poetry
+        run: |
+          pipx install poetry
+          echo "/root/.local/bin" >> $GITHUB_PATH
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"  # ${{ matrix.python-version }}
+      - name: Install Python dependencies
+        run: |
+          poetry install --with=test --no-interaction --no-root
+
+      - name: Add PostgreSQL binaries to PATH
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" == "Windows" ]; then
+            echo "$PGBIN" >> $GITHUB_PATH
+          elif [ "$RUNNER_OS" == "Linux" ]; then
+            echo "$(pg_config --bindir)" >> $GITHUB_PATH
+          fi
+      - name: Start preinstalled PostgreSQL
+        shell: bash
+        run: |
+          echo "Initializing database cluster..."
+
+          # Convert backslashes to forward slashes in RUNNER_TEMP for Windows Git Bash
+          export PGHOST="${RUNNER_TEMP//\\//}/postgres"
+          export PGDATA="$PGHOST/pgdata"
+          mkdir -p "$PGDATA"
+
+          # initdb requires file for password in non-interactive mode
+          export PWFILE="$RUNNER_TEMP/pwfile"
+          echo "postgres" > $PWFILE
+          initdb --pgdata="$PGDATA" --username="postgres" --pwfile="$PWFILE"
+
+          echo "Starting PostgreSQL..."
+          echo "shared_preload_libraries = pg_stat_statements" >> "$PGDATA/postgresql.conf"
+          echo "unix_socket_directories = '$PGHOST'" >> "$PGDATA/postgresql.conf"
+          pg_ctl start
+
+          echo "Creating user..."
+          psql --host "$PGHOST" --username="postgres" --dbname="postgres" \
+            --command="CREATE USER $PGUSERNAME WITH ENCRYPTED PASSWORD '$PGPASSWORD' CREATEDB" \
+            --command="\du"
+
+          psql --username="postgres" --dbname="postgres" --tuples-only --command="SHOW server_version;" | cut -d ' ' -f 1
+          echo "POSTGRES_VERSION=$(psql --username='postgres' --dbname="postgres" --tuples-only --command='SHOW server_version;' | cut -d ' ' -f 1)" >> "$GITHUB_ENV"
+
+          psql --username="postgres" --dbname="template1" \
+               --command="CREATE EXTENSION IF NOT EXISTS pg_stat_statements;"
+
+          echo "Creating database..."
+          createdb --owner="$PGUSERNAME" --username="postgres" "$PGDATABASE"
+
+      - name: Run tests
+        run: |
+          PYTHONPATH=src poetry run python3 manage.py check
+          poetry run pytest

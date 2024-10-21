@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/4.0/ref/settings/
 """
 
 import os
+import re
 from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -40,10 +41,15 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
 
-    'django_extensions',
-
-    'django_pg_trunk',
+    'django_pg_stat_statements',
 ]
+
+try:
+    import django_extensions  # noqa: F401
+except ImportError:
+    pass
+else:
+    INSTALLED_APPS += ['django_extensions']
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
@@ -82,11 +88,11 @@ WSGI_APPLICATION = 'test_app.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'trunk',
-        'USER': 'trunk',
-        'PASSWORD': 'trunk',
-        'HOST': 'localhost' if os.environ.get('CIRCLECI') else 'postgres',
-        'PORT': '5432',
+        'HOST': os.environ.get('PGHOST', 'postgres'),
+        'PORT': os.environ.get('PGPORT', '5432'),
+        'USER': os.environ.get('PGUSERNAME', 'testuser'),
+        'PASSWORD': os.environ.get('PGPASSWORD', 'testpw'),
+        'NAME': os.environ.get('PGDATABASE', 'testdb'),
     }
 }
 
@@ -131,3 +137,5 @@ STATIC_URL = 'static/'
 # https://docs.djangoproject.com/en/4.0/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+POSTGRES_VERSION = tuple(int(_) for _ in tuple(os.environ.get('POSTGRES_VERSION', re.split(r'[-.+]', '17')))[:3])

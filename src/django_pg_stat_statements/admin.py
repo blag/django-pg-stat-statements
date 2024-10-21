@@ -1,10 +1,11 @@
+from django.conf import settings
 from django.contrib import admin
 from django.contrib.admin.options import IncorrectLookupParameters
 from django.contrib.admin.views.main import ChangeList
 from django.core.exceptions import ValidationError
 
-from django_pg_trunk.models import QueryStatistic
-from django_pg_trunk.utils import get_current_database_id
+from .models import QueryStatistic
+from .utils import get_current_database_id
 
 
 class DbidListFilter(admin.SimpleListFilter):
@@ -37,6 +38,7 @@ class DbidListFilter(admin.SimpleListFilter):
             raise IncorrectLookupParameters(e)
 
 
+@admin.register(QueryStatistic)
 class QueryStatisticAdmin(admin.ModelAdmin):
     fieldsets = (
         ("Statement", {
@@ -49,21 +51,24 @@ class QueryStatisticAdmin(admin.ModelAdmin):
             "fields": ("plans", "total_plan_time", "min_plan_time", "max_plan_time", "mean_plan_time", "stddev_plan_time",)
         }),
         ("Shared Blocks", {
-            "fields": ("shared_blks_hit", "shared_blks_read", "shared_blks_dirtied", "shared_blks_written",)
+            "fields": ("shared_blks_hit", "shared_blks_read", "shared_blks_dirtied", "shared_blks_written",) + (("shared_blk_read_time", "shared_blk_write_time",) if settings.POSTGRES_VERSION >= (17,) else tuple())
         }),
         ("Local Blocks", {
-            "fields": ("local_blks_hit", "local_blks_read", "local_blks_dirtied", "local_blks_written",)
+            "fields": ("local_blks_hit", "local_blks_read", "local_blks_dirtied", "local_blks_written",) + (("local_blk_read_time", "local_blk_write_time",) if settings.POSTGRES_VERSION >= (17,) else tuple())
         }),
         ("Temp Blocks", {
-            "fields": ("temp_blks_read", "temp_blks_written",)
-        }),
-        ("Block Read/Write", {
-            "fields": ("blk_read_time", "blk_write_time",)
+            "fields": ("temp_blks_read", "temp_blks_written",) + (("temp_blk_read_time", "temp_blk_write_time",) if settings.POSTGRES_VERSION >= (15,) else tuple())
         }),
         ("WAL", {
             "fields": ("wal_records", "wal_fpi", "wal_bytes",)
         }),
     )
+    if settings.POSTGRES_VERSION < (17,):
+        fieldsets += (
+            ("Block Read/Write", {
+                "fields": ("blk_read_time", "blk_write_time",)
+            }),
+        )
     list_display = ("queryid", "dbid", "userid", "query", "mean_exec_time", "rows", "calls",)
     search_fields = ("query",)
     list_filter = (DbidListFilter,)
@@ -92,6 +97,3 @@ class QueryStatisticAdmin(admin.ModelAdmin):
             return queryset.get(queryid=queryid, dbid=dbid, userid=userid)
         except (queryset.model.DoesNotExist, ValidationError, ValueError):
             return None
-
-
-admin.site.register(QueryStatistic, QueryStatisticAdmin)
